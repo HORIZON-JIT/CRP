@@ -444,14 +444,14 @@
             <button class="btn-back" onclick="backToMenu()">← フォルダ選択に戻る</button>
             <div class="search-card">
                 <div class="search-box">
-                    <input type="text" id="search-input" placeholder="ファイル名で検索..." onkeydown="if(event.key==='Enter') handleSearch()">
-                    <button class="btn-search" onclick="handleSearch()">検索</button>
+                    <input type="text" id="search-input" placeholder="ファイル名で絞り込み..." oninput="handleSearch()" onkeydown="if(event.key==='Enter') handleSearch()">
+                    <button class="btn-search" onclick="handleSearch()">絞り込み</button>
                 </div>
             </div>
         </div>
 
         <div id="status" class="status"></div>
-        <div id="loading" class="loading">検索中</div>
+        <div id="loading" class="loading">読み込み中</div>
         <div id="results" class="results-wrapper"></div>
     </div>
 
@@ -474,6 +474,7 @@
         let tokenClient;
         let accessToken = null;
         let currentFolder = null;
+        let allFiles = [];
 
         window.addEventListener('load', () => {
             tokenClient = google.accounts.oauth2.initTokenClient({
@@ -534,69 +535,32 @@
             ).join('');
         }
 
-        function selectFolder(index) {
+        async function selectFolder(index) {
             currentFolder = FOLDERS[index];
+            allFiles = [];
             document.getElementById('menu-section').classList.remove('active');
             document.getElementById('search-section').classList.add('active');
             document.getElementById('page-title').textContent = currentFolder.label;
             document.getElementById('search-input').value = '';
             document.getElementById('results').innerHTML = '';
             hideStatus();
-        }
 
-        function backToMenu() {
-            currentFolder = null;
-            document.getElementById('search-section').classList.remove('active');
-            document.getElementById('menu-section').classList.add('active');
-            document.getElementById('page-title').textContent = DEFAULT_TITLE;
-            document.getElementById('search-input').value = '';
-            document.getElementById('results').innerHTML = '';
-            hideStatus();
-        }
-
-        // --- 検索関連 ---
-
-        async function fetchUserInfo() {
-            try {
-                const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-                    headers: { 'Authorization': 'Bearer ' + accessToken }
-                });
-                const data = await res.json();
-                document.getElementById('user-info').textContent = data.email || '';
-            } catch {
-                // ユーザー情報の取得失敗は無視
+            // フォルダ内の全ファイルを取得して表示
+            if (accessToken) {
+                document.getElementById('loading').classList.add('active');
+                try {
+                    allFiles = await fetchAllFiles(currentFolder.id);
+                    renderResults(allFiles, '');
+                } catch (err) {
+                    showStatus('ファイル一覧の取得に失敗しました: ' + err.message, 'error');
+                } finally {
+                    document.getElementById('loading').classList.remove('active');
+                }
             }
         }
 
-        async function handleSearch() {
-            const keyword = document.getElementById('search-input').value.trim();
-            if (!keyword) {
-                showStatus('検索キーワードを入力してください', 'info');
-                return;
-            }
-            if (!accessToken) {
-                showStatus('先にサインインしてください', 'error');
-                return;
-            }
-
-            document.getElementById('loading').classList.add('active');
-            document.getElementById('results').innerHTML = '';
-            hideStatus();
-
-            try {
-                const files = await searchFiles(keyword);
-                renderResults(files, keyword);
-            } catch (err) {
-                showStatus('検索中にエラーが発生しました: ' + err.message, 'error');
-            } finally {
-                document.getElementById('loading').classList.remove('active');
-            }
-        }
-
-        async function searchFiles(keyword) {
-            const escapedKeyword = keyword.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            const query = `name contains '${escapedKeyword}' and '${currentFolder.id}' in parents and trashed=false`;
-
+        async function fetchAllFiles(folderId) {
+            const query = `'${folderId}' in parents and trashed=false`;
             const params = new URLSearchParams({
                 q: query,
                 fields: 'files(id,name,modifiedTime,size,webViewLink)',
@@ -623,15 +587,63 @@
             return data.files || [];
         }
 
+        function backToMenu() {
+            currentFolder = null;
+            allFiles = [];
+            document.getElementById('search-section').classList.remove('active');
+            document.getElementById('menu-section').classList.add('active');
+            document.getElementById('page-title').textContent = DEFAULT_TITLE;
+            document.getElementById('search-input').value = '';
+            document.getElementById('results').innerHTML = '';
+            hideStatus();
+        }
+
+        // --- 検索関連 ---
+
+        async function fetchUserInfo() {
+            try {
+                const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                });
+                const data = await res.json();
+                document.getElementById('user-info').textContent = data.email || '';
+            } catch {
+                // ユーザー情報の取得失敗は無視
+            }
+        }
+
+        function handleSearch() {
+            const keyword = document.getElementById('search-input').value.trim();
+            hideStatus();
+
+            if (!keyword) {
+                renderResults(allFiles, '');
+                return;
+            }
+
+            const lowerKeyword = keyword.toLowerCase();
+            const filtered = allFiles.filter(file =>
+                file.name.toLowerCase().includes(lowerKeyword)
+            );
+            renderResults(filtered, keyword);
+        }
+
         function renderResults(files, keyword) {
             const container = document.getElementById('results');
 
             if (files.length === 0) {
-                container.innerHTML = `<div class="result-count">「${escapeHtml(keyword)}」に一致するファイルは見つかりませんでした。</div>`;
+                if (keyword) {
+                    container.innerHTML = `<div class="result-count">「${escapeHtml(keyword)}」に一致するファイルはありません。</div>`;
+                } else {
+                    container.innerHTML = `<div class="result-count">このフォルダにファイルはありません。</div>`;
+                }
                 return;
             }
 
-            let html = `<div class="result-count">${files.length} 件のファイルが見つかりました</div>`;
+            const countText = keyword
+                ? `${files.length} 件が「${escapeHtml(keyword)}」に一致（全 ${allFiles.length} 件中）`
+                : `全 ${files.length} 件`;
+            let html = `<div class="result-count">${countText}</div>`;
             html += `<table class="results-table">
                 <thead>
                     <tr>
