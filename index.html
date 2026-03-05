@@ -235,8 +235,8 @@
             3. 「APIとサービス」→「認証情報」→「認証情報を作成」→「OAuth クライアントID」を作成（種類: ウェブアプリケーション）<br>
             4. 「承認済みの JavaScript 生成元」に <code>http://localhost</code> やファイルを配信するオリジンを追加<br>
             5. このファイルの <code>CLIENT_ID</code> を取得したクライアントIDに置き換える<br>
-            6. このファイルの <code>SHARED_DRIVE_ID</code> を検索対象の共有ドライブIDに置き換える<br>
-            　※ 共有ドライブのURLが <code>https://drive.google.com/drive/folders/XXXXX</code> の場合、XXXXX部分がIDです
+            6. このファイルの <code>FOLDER_ID</code> を検索対象のフォルダIDに置き換える<br>
+            　※ フォルダのURLが <code>https://drive.google.com/drive/folders/XXXXX</code> の場合、XXXXX部分がIDです
         </div>
     </div>
 
@@ -245,8 +245,8 @@
         // ============================================================
         // ここにご自身の OAuth 2.0 クライアントIDを設定してください
         const CLIENT_ID = '158402335540-hk7sn0l40k0hquhcfvm27ceroj2ubpl7.apps.googleusercontent.com';
-        // ここに検索対象の共有ドライブIDを設定してください
-        const SHARED_DRIVE_ID = '12_BMOQb5aA_pTOm132OAAoqm8woyFEfM';
+        // ここに検索対象のフォルダIDを設定してください
+        const FOLDER_ID = '12_BMOQb5aA_pTOm132OAAoqm8woyFEfM';
         // ============================================================
 
         const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
@@ -338,15 +338,13 @@
 
         async function searchExcelFiles(keyword) {
             const escapedKeyword = keyword.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            const query = `name contains '${escapedKeyword}' and (mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType='application/vnd.ms-excel') and trashed=false`;
+            const query = `name contains '${escapedKeyword}' and '${FOLDER_ID}' in parents and (mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType='application/vnd.ms-excel') and trashed=false`;
 
             const params = new URLSearchParams({
                 q: query,
                 fields: 'files(id,name,modifiedTime,size,webViewLink)',
                 orderBy: 'modifiedTime desc',
                 pageSize: '100',
-                driveId: SHARED_DRIVE_ID,
-                corpora: 'drive',
                 includeItemsFromAllDrives: 'true',
                 supportsAllDrives: 'true',
             });
