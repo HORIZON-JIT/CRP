@@ -488,8 +488,19 @@
                 callback: onTokenResponse,
             });
             renderMenu();
-            // 自動サインイン: Googleログイン済みならポップアップなしでトークン取得
-            tokenClient.requestAccessToken({ prompt: '' });
+
+            // キャッシュからトークンを復元
+            const cachedToken = sessionStorage.getItem('access_token');
+            const cachedExpiry = sessionStorage.getItem('token_expiry');
+            if (cachedToken && cachedExpiry && Date.now() < Number(cachedExpiry)) {
+                accessToken = cachedToken;
+                activateSignedInUI();
+            } else {
+                sessionStorage.removeItem('access_token');
+                sessionStorage.removeItem('token_expiry');
+                // 自動サインイン: Googleログイン済みならポップアップなしでトークン取得
+                tokenClient.requestAccessToken({ prompt: '' });
+            }
         });
 
         function onTokenResponse(response) {
@@ -498,6 +509,14 @@
                 return;
             }
             accessToken = response.access_token;
+            // トークンをsessionStorageにキャッシュ（有効期限付き）
+            const expiresIn = response.expires_in || 3600;
+            sessionStorage.setItem('access_token', accessToken);
+            sessionStorage.setItem('token_expiry', String(Date.now() + expiresIn * 1000));
+            activateSignedInUI();
+        }
+
+        function activateSignedInUI() {
             document.getElementById('signin-section').style.display = 'none';
             document.getElementById('btn-signout').style.display = 'inline-block';
             document.getElementById('btn-history').style.display = 'inline-block';
@@ -519,6 +538,8 @@
             }
             accessToken = null;
             currentFolder = null;
+            sessionStorage.removeItem('access_token');
+            sessionStorage.removeItem('token_expiry');
             document.getElementById('signin-section').style.display = '';
             document.getElementById('btn-signout').style.display = 'none';
             document.getElementById('btn-history').style.display = 'none';
