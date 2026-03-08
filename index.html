@@ -362,6 +362,27 @@
             border-bottom: 2px solid #e0e7ef;
         }
 
+        .results-table th.sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.2s;
+        }
+
+        .results-table th.sortable:hover {
+            color: #1565c0;
+        }
+
+        .results-table th .sort-icon {
+            display: inline-block;
+            margin-left: 4px;
+            font-size: 10px;
+            color: #bbb;
+        }
+
+        .results-table th.sort-active .sort-icon {
+            color: #1565c0;
+        }
+
         .results-table td {
             padding: 14px 20px;
             border-bottom: 1px solid #f0f4f8;
@@ -502,6 +523,8 @@
         let currentFolder = null;
         let allFiles = [];
         let currentUserEmail = '';
+        let sortKey = 'modifiedTime';  // 'name' or 'modifiedTime'
+        let sortAsc = false;           // デフォルト: 更新日時の降順
 
         window.addEventListener('load', () => {
             tokenClient = google.accounts.oauth2.initTokenClient({
@@ -682,6 +705,28 @@
             renderResults(filtered, keyword);
         }
 
+        function toggleSort(key) {
+            if (sortKey === key) {
+                sortAsc = !sortAsc;
+            } else {
+                sortKey = key;
+                sortAsc = key === 'name'; // ファイル名は昇順、日時は降順がデフォルト
+            }
+            handleSearch();
+        }
+
+        function sortFiles(files) {
+            return [...files].sort((a, b) => {
+                let cmp;
+                if (sortKey === 'name') {
+                    cmp = a.name.localeCompare(b.name, 'ja');
+                } else {
+                    cmp = new Date(a.modifiedTime) - new Date(b.modifiedTime);
+                }
+                return sortAsc ? cmp : -cmp;
+            });
+        }
+
         function renderResults(files, keyword) {
             const container = document.getElementById('results');
 
@@ -694,6 +739,10 @@
                 return;
             }
 
+            const sorted = sortFiles(files);
+            const arrow = (key) => sortKey === key ? (sortAsc ? '▲' : '▼') : '▲▼';
+            const activeClass = (key) => sortKey === key ? ' sort-active' : '';
+
             const countText = keyword
                 ? `${files.length} 件が「${escapeHtml(keyword)}」に一致（全 ${allFiles.length} 件中）`
                 : `全 ${files.length} 件`;
@@ -701,14 +750,14 @@
             html += `<table class="results-table">
                 <thead>
                     <tr>
-                        <th>ファイル名</th>
-                        <th>更新日時</th>
+                        <th class="sortable${activeClass('name')}" onclick="toggleSort('name')">ファイル名<span class="sort-icon">${arrow('name')}</span></th>
+                        <th class="sortable${activeClass('modifiedTime')}" onclick="toggleSort('modifiedTime')">更新日時<span class="sort-icon">${arrow('modifiedTime')}</span></th>
                         <th>サイズ</th>
                     </tr>
                 </thead>
                 <tbody>`;
 
-            for (const file of files) {
+            for (const file of sorted) {
                 const modifiedDate = new Date(file.modifiedTime).toLocaleString('ja-JP');
                 const fileSize = file.size ? formatFileSize(Number(file.size)) : '-';
                 const link = file.webViewLink || '#';
