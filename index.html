@@ -200,6 +200,17 @@
             line-height: 1.4;
         }
 
+        /* Breadcrumb */
+        .breadcrumb {
+            font-size: 13px;
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline !important;
+        }
+
         /* Search section */
         .search-section {
             display: none;
@@ -487,7 +498,9 @@
 
         <!-- Search -->
         <div id="search-section" class="search-section">
-            <button class="btn-back" onclick="backToMenu()">← フォルダ選択に戻る</button>
+            <button class="btn-back" onclick="backToMenu()">← 戻る</button>
+            <div id="breadcrumb" class="breadcrumb"></div>
+            <div id="subfolder-area"></div>
             <div class="search-card">
                 <div class="search-box">
                     <input type="text" id="search-input" placeholder="ファイル名で絞り込み..." oninput="handleSearch()" onkeydown="if(event.key==='Enter') handleSearch()">
@@ -524,6 +537,7 @@
         let currentFolder = null;
         let allFiles = [];
         let currentUserEmail = '';
+        let folderHistory = [];        // パンくず用の階層履歴 [{id, label}]
         let sortKey = 'modifiedTime';  // 'name' or 'modifiedTime'
         let sortAsc = false;           // デフォルト: 更新日時の降順
 
@@ -610,37 +624,104 @@
         async function selectFolder(index) {
             currentFolder = FOLDERS[index];
             allFiles = [];
+            folderHistory = [{ id: currentFolder.id, label: currentFolder.label }];
             document.getElementById('menu-section').classList.remove('active');
             document.getElementById('search-section').classList.add('active');
-            document.getElementById('page-title').textContent = currentFolder.label;
             document.getElementById('search-input').value = '';
             document.getElementById('results').innerHTML = '';
             hideStatus();
+            await navigateToFolder(currentFolder.id, currentFolder.label, false);
+        }
 
-            // フォルダ内の全ファイルを取得して表示
-            if (accessToken) {
-                document.getElementById('loading').classList.add('active');
-                try {
-                    let files = await fetchAllFiles(currentFolder.id);
-                    if (currentFolder.excludeExt) {
-                        const exts = currentFolder.excludeExt.map(e => e.toLowerCase());
-                        files = files.filter(f => !exts.some(ext => f.name.toLowerCase().endsWith(ext)));
-                    }
-                    allFiles = files;
-                    renderResults(allFiles, '');
-                } catch (err) {
-                    showStatus('ファイル一覧の取得に失敗しました: ' + err.message, 'error');
-                } finally {
-                    document.getElementById('loading').classList.remove('active');
+        async function navigateToFolder(folderId, label, pushHistory) {
+            if (pushHistory) {
+                folderHistory.push({ id: folderId, label: label });
+            }
+            // タイトル更新
+            const currentLabel = folderHistory[folderHistory.length - 1].label;
+            document.getElementById('page-title').textContent = currentLabel;
+            renderBreadcrumb();
+
+            if (!accessToken) return;
+
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('subfolder-area').innerHTML = '';
+            document.getElementById('search-input').value = '';
+            hideStatus();
+
+            try {
+                let items = await fetchAllFiles(folderId);
+                const FOLDER_MIME = 'application/vnd.google-apps.folder';
+                const subfolders = items.filter(f => f.mimeType === FOLDER_MIME);
+                let files = items.filter(f => f.mimeType !== FOLDER_MIME);
+
+                // 拡張子フィルタ適用（ルートフォルダの設定を継承）
+                if (currentFolder.excludeExt) {
+                    const exts = currentFolder.excludeExt.map(e => e.toLowerCase());
+                    files = files.filter(f => !exts.some(ext => f.name.toLowerCase().endsWith(ext)));
+                }
+
+                if (subfolders.length > 0) {
+                    renderSubfolderView(subfolders);
+                }
+
+                allFiles = files;
+                if (files.length > 0) {
+                    renderResults(files, '');
+                } else if (subfolders.length === 0) {
+                    renderResults([], '');
+                }
+            } catch (err) {
+                showStatus('ファイル一覧の取得に失敗しました: ' + err.message, 'error');
+            } finally {
+                document.getElementById('loading').classList.remove('active');
+            }
+        }
+
+        function renderSubfolderView(subfolders) {
+            const container = document.getElementById('subfolder-area');
+            container.innerHTML = `
+                <p class="section-label" style="margin-top: 8px;">サブフォルダ</p>
+                <div class="menu-grid" style="margin-bottom: 24px;">
+                    ${subfolders.map(f =>
+                        `<button class="folder-card" onclick="navigateToFolder('${f.id}', '${escapeHtml(f.name)}', true)">
+                            <span class="folder-icon">📁</span>
+                            <span class="folder-label">${escapeHtml(f.name)}</span>
+                        </button>`
+                    ).join('')}
+                </div>`;
+        }
+
+        function renderBreadcrumb() {
+            const container = document.getElementById('breadcrumb');
+            if (folderHistory.length <= 1) {
+                container.innerHTML = '';
+                return;
+            }
+            let html = '';
+            for (let i = 0; i < folderHistory.length; i++) {
+                if (i > 0) html += ' <span style="color:#999;margin:0 4px;">›</span> ';
+                if (i < folderHistory.length - 1) {
+                    html += `<a href="#" onclick="navigateToBreadcrumb(${i}); return false;" style="color:#1565c0;text-decoration:none;font-weight:500;">${escapeHtml(folderHistory[i].label)}</a>`;
+                } else {
+                    html += `<span style="color:#333;font-weight:600;">${escapeHtml(folderHistory[i].label)}</span>`;
                 }
             }
+            container.innerHTML = html;
+        }
+
+        async function navigateToBreadcrumb(index) {
+            folderHistory = folderHistory.slice(0, index + 1);
+            const target = folderHistory[index];
+            await navigateToFolder(target.id, target.label, false);
         }
 
         async function fetchAllFiles(folderId) {
             const query = `'${folderId}' in parents and trashed=false`;
             const params = new URLSearchParams({
                 q: query,
-                fields: 'files(id,name,modifiedTime,size,webViewLink)',
+                fields: 'files(id,name,mimeType,modifiedTime,size,webViewLink)',
                 orderBy: 'modifiedTime desc',
                 pageSize: '100',
                 includeItemsFromAllDrives: 'true',
@@ -665,13 +746,24 @@
         }
 
         function backToMenu() {
+            if (folderHistory.length > 1) {
+                // 1つ上の階層に戻る
+                folderHistory.pop();
+                const parent = folderHistory[folderHistory.length - 1];
+                navigateToFolder(parent.id, parent.label, false);
+                return;
+            }
+            // トップメニューに戻る
             currentFolder = null;
             allFiles = [];
+            folderHistory = [];
             document.getElementById('search-section').classList.remove('active');
             document.getElementById('menu-section').classList.add('active');
             document.getElementById('page-title').textContent = DEFAULT_TITLE;
             document.getElementById('search-input').value = '';
             document.getElementById('results').innerHTML = '';
+            document.getElementById('subfolder-area').innerHTML = '';
+            document.getElementById('breadcrumb').innerHTML = '';
             hideStatus();
         }
 
