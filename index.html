@@ -200,6 +200,25 @@
             line-height: 1.4;
         }
 
+        /* Content search toggle */
+        .content-search-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            font-size: 14px;
+            color: #555;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .content-search-label input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: #1565c0;
+            cursor: pointer;
+        }
+
         /* Breadcrumb */
         .breadcrumb {
             font-size: 13px;
@@ -504,8 +523,12 @@
             <div class="search-card">
                 <div class="search-box">
                     <input type="text" id="search-input" placeholder="ファイル名で絞り込み..." oninput="handleSearch()" onkeydown="if(event.key==='Enter') handleSearch()">
-                    <button class="btn-search" onclick="handleSearch()">絞り込み</button>
+                    <button class="btn-search" onclick="handleSearch()">検索</button>
                 </div>
+                <label class="content-search-label">
+                    <input type="checkbox" id="content-search-toggle" onchange="handleContentSearchToggle()">
+                    <span>ファイル内容も検索（Excel等の中身を検索）</span>
+                </label>
             </div>
         </div>
 
@@ -782,20 +805,100 @@
             }
         }
 
-        function handleSearch() {
+        let contentSearchDebounceTimer = null;
+
+        async function handleSearch() {
             const keyword = document.getElementById('search-input').value.trim();
+            const contentSearch = document.getElementById('content-search-toggle').checked;
             hideStatus();
 
             if (!keyword) {
-                renderResults(allFiles, '');
+                if (!contentSearch) {
+                    renderResults(allFiles, '');
+                } else {
+                    document.getElementById('results').innerHTML = '';
+                }
                 return;
             }
 
-            const lowerKeyword = keyword.toLowerCase();
-            const filtered = allFiles.filter(file =>
-                file.name.toLowerCase().includes(lowerKeyword)
-            );
-            renderResults(filtered, keyword);
+            if (contentSearch) {
+                // 内容検索: デバウンスしてEnterまたはボタン押下で実行
+                // oninputからの呼び出しはデバウンスで遅延
+                if (contentSearchDebounceTimer) clearTimeout(contentSearchDebounceTimer);
+                contentSearchDebounceTimer = setTimeout(() => searchFileContents(keyword), 600);
+            } else {
+                // 従来のファイル名フィルタリング
+                const lowerKeyword = keyword.toLowerCase();
+                const filtered = allFiles.filter(file =>
+                    file.name.toLowerCase().includes(lowerKeyword)
+                );
+                renderResults(filtered, keyword);
+            }
+        }
+
+        async function searchFileContents(keyword) {
+            const folderId = folderHistory[folderHistory.length - 1].id;
+            const escaped = keyword.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const query = `'${folderId}' in parents and trashed=false and fullText contains '${escaped}'`;
+
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('results').innerHTML = '';
+            hideStatus();
+
+            try {
+                const params = new URLSearchParams({
+                    q: query,
+                    fields: 'files(id,name,mimeType,modifiedTime,size,webViewLink)',
+                    pageSize: '100',
+                    includeItemsFromAllDrives: 'true',
+                    supportsAllDrives: 'true',
+                });
+
+                const res = await fetch(`${DRIVE_API}?${params}`, {
+                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                });
+
+                if (!res.ok) {
+                    if (res.status === 401) {
+                        accessToken = null;
+                        handleSignOut();
+                        throw new Error('セッションが期限切れです。再度サインインしてください。');
+                    }
+                    throw new Error(`API エラー (${res.status})`);
+                }
+
+                const data = await res.json();
+                let files = (data.files || []).filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+
+                if (currentFolder.excludeExt) {
+                    const exts = currentFolder.excludeExt.map(e => e.toLowerCase());
+                    files = files.filter(f => !exts.some(ext => f.name.toLowerCase().endsWith(ext)));
+                }
+
+                renderResults(files, keyword);
+                if (files.length > 0) {
+                    showStatus(`ファイル内容検索: 「${keyword}」を含む ${files.length} 件が見つかりました`, 'success');
+                }
+            } catch (err) {
+                showStatus('内容検索に失敗しました: ' + err.message, 'error');
+            } finally {
+                document.getElementById('loading').classList.remove('active');
+            }
+        }
+
+        function handleContentSearchToggle() {
+            const contentSearch = document.getElementById('content-search-toggle').checked;
+            const input = document.getElementById('search-input');
+            if (contentSearch) {
+                input.placeholder = 'ファイル内容を検索...';
+                // 内容検索時はoninputでのリアルタイム検索を無効化（APIコール削減）
+                input.removeAttribute('oninput');
+            } else {
+                input.placeholder = 'ファイル名で絞り込み...';
+                input.setAttribute('oninput', 'handleSearch()');
+            }
+            document.getElementById('results').innerHTML = '';
+            hideStatus();
         }
 
         function toggleSort(key) {
