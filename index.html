@@ -807,6 +807,12 @@
 
         let contentSearchDebounceTimer = null;
 
+        function extractBaseKeyword(keyword) {
+            // 品番末尾の -数字 を除去してベースを返す (例: A928100-03 → A928100)
+            const match = keyword.match(/^(.*)-\d+$/);
+            return match ? match[1] : null;
+        }
+
         async function handleSearch() {
             const keyword = document.getElementById('search-input').value.trim();
             const contentSearch = document.getElementById('content-search-toggle').checked;
@@ -827,11 +833,14 @@
                 if (contentSearchDebounceTimer) clearTimeout(contentSearchDebounceTimer);
                 contentSearchDebounceTimer = setTimeout(() => searchFileContents(keyword), 600);
             } else {
-                // 従来のファイル名フィルタリング
+                // 従来のファイル名フィルタリング（品番ベース部分一致を含む）
                 const lowerKeyword = keyword.toLowerCase();
-                const filtered = allFiles.filter(file =>
-                    file.name.toLowerCase().includes(lowerKeyword)
-                );
+                const baseKeyword = extractBaseKeyword(keyword);
+                const lowerBase = baseKeyword ? baseKeyword.toLowerCase() : null;
+                const filtered = allFiles.filter(file => {
+                    const lowerName = file.name.toLowerCase();
+                    return lowerName.includes(lowerKeyword) || (lowerBase && lowerName.includes(lowerBase));
+                });
                 renderResults(filtered, keyword);
             }
         }
@@ -870,9 +879,14 @@
                 const data = await res.json();
                 let contentFiles = (data.files || []).filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
 
-                // ファイル名一致もマージ（内容検索時もファイル名でヒットさせる）
+                // ファイル名一致もマージ（内容検索時もファイル名でヒットさせる、品番ベース部分一致を含む）
                 const lowerKeyword = keyword.toLowerCase();
-                const nameMatched = allFiles.filter(f => f.name.toLowerCase().includes(lowerKeyword));
+                const baseKeyword = extractBaseKeyword(keyword);
+                const lowerBase = baseKeyword ? baseKeyword.toLowerCase() : null;
+                const nameMatched = allFiles.filter(f => {
+                    const lowerName = f.name.toLowerCase();
+                    return lowerName.includes(lowerKeyword) || (lowerBase && lowerName.includes(lowerBase));
+                });
 
                 const mergedMap = new Map();
                 contentFiles.forEach(f => mergedMap.set(f.id, f));
